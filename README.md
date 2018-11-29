@@ -32,3 +32,7 @@ Spec:
 https://github.com/tuupola/branca-spec
 
 Encryption Library: Bouncycastle
+
+#### Build
+
+[![CircleCI](https://circleci.com/gh/bjoernw/jbranca/tree/master.svg?style=svg)](https://circleci.com/gh/bjoernw/jbranca/tree/master)
