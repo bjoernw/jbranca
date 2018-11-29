@@ -1,3 +1,18 @@
+/*
+ * Copyright © 2018 Bjoern Weidlich (bjoernweidlich@gmail.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.bjoern.jbranca;
 
 import io.seruco.encoding.base62.Base62;
@@ -8,48 +23,37 @@ import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.crypto.params.ParametersWithIV;
 
 import java.nio.ByteBuffer;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.util.Arrays;
 
+
+/**
+ * Constructs Branca tokens from provided payloads as well as validates and unpacks them.
+ */
 public class BrancaTokenFactory {
     private static final byte VERSION = (byte) 0xBA;
-    public static final int TAG_LENGTH = 16;
-    public static final int HEADER_LENGTH = 29;
+    private static final int TAG_LENGTH = 16;
+    private static final int HEADER_LENGTH = 29;
     private final byte[] key;
 
-    public BrancaTokenFactory(byte[] key) {
-        this.key = key;
-    }
-
-    public byte[] encode(byte[] plaintext) {
-        return encode(plaintext, makeRandomNonce());
-    }
-
-    private static int unixTimeNow() {
-        return (int) (System.currentTimeMillis() / 1000);
-    }
-
-    private static byte[] bigEndian(int unixTime) {
-        return new byte[]{
-                (byte) (unixTime >> 24),
-                (byte) (unixTime >> 16),
-                (byte) (unixTime >> 8),
-                (byte) unixTime
-        };
-    }
-
-    public static byte[] makeRandomNonce() {
-        byte[] bytes = new byte[24];
-        try {
-            SecureRandom.getInstanceStrong().nextBytes(bytes);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
+    public BrancaTokenFactory(byte[] secretKey) {
+        if (secretKey.length != 32) {
+            throw new IllegalArgumentException("Secret key must be 32 bytes");
         }
-        return bytes;
+        this.key = Arrays.copyOf(secretKey, secretKey.length);
     }
 
-    public byte[] encode(byte[] plaintext, byte[] nonce) {
+    public byte[] seal(byte[] plaintext) {
+        return seal(plaintext, Bytes.makeRandomNonce());
+    }
+
+    /**
+     * Generates a Branca token with plaintext as the payload using the provided nonce. Make sure this nonce is plenty random.
+     *
+     * @param plaintext
+     * @param nonce
+     * @return
+     */
+    public byte[] seal(byte[] plaintext, byte[] nonce) {
 
         ByteBuffer header = ByteBuffer.allocate(1 + 4 + 24);
 
@@ -62,7 +66,7 @@ public class BrancaTokenFactory {
         /*
             Timestamp (4B)
          */
-        byte[] timestamp = makeTimestamp();
+        byte[] timestamp = Time.makeTimestamp();
         header.put(timestamp, 0, timestamp.length);
         header.position(5);
 
@@ -77,30 +81,15 @@ public class BrancaTokenFactory {
          */
         byte[] cipherAndTag = encrypt(header.array(), plaintext, nonce);
 
-        byte[] headerAndCipher = addAll(header.array(), cipherAndTag);
+        byte[] headerAndCipher = Bytes.addAll(header.array(), cipherAndTag);
 
-        return base62Encode(headerAndCipher);
-    }
-
-    private static byte[] addAll(final byte[] one, byte[] two) {
-        byte[] ret = Arrays.copyOf(one, one.length + two.length);
-        System.arraycopy(two, 0, ret, one.length, two.length);
-        return ret;
-    }
-
-    private static byte[] makeTimestamp() {
-        return bigEndian(unixTimeNow());
-    }
-
-    private static byte[] base62Encode(byte[] input) {
-        return Base62.createInstance().encode(input);
+        return Bytes.base62Encode(headerAndCipher);
     }
 
     private byte[] encrypt(byte[] header, byte[] plaintext, byte[] nonce) {
         CipherParameters cp = new KeyParameter(key);
         ParametersWithIV params = new ParametersWithIV(cp, nonce);
         StreamCipher engine = new XChaCha20Engine();
-
         engine.init(true, params);
         byte[] encrypted = new byte[plaintext.length + TAG_LENGTH];
 
@@ -120,7 +109,6 @@ public class BrancaTokenFactory {
         CipherParameters cp = new KeyParameter(key);
         ParametersWithIV params = new ParametersWithIV(cp, nonce);
 
-
         byte[] headerMac = new byte[16];
         final Poly1305 poly1305 = new Poly1305();
         poly1305.init(cp);
@@ -128,7 +116,7 @@ public class BrancaTokenFactory {
         poly1305.doFinal(headerMac, 0);
 
         if (!Arrays.equals(headerMac, mac)) {
-            throw new RuntimeException("Auth failed");
+            throw new IllegalArgumentException("Auth failed");
         }
 
         StreamCipher engine = new XChaCha20Engine();
@@ -138,14 +126,16 @@ public class BrancaTokenFactory {
         return decrypted;
     }
 
-    private void checkPoly1305(byte[] plaintext, byte[] nonce, byte[] untrustedMac) {
-
-    }
-
-    public byte[] decode(byte[] token) {
+    /**
+     * Given a Branca token in the correct format this method returns the plaintext
+     *
+     * @param token valid Branca token
+     * @return plaintext payload
+     */
+    public byte[] open(byte[] token) {
         byte[] decoded = Base62.createInstance().decode(token);
         if (decoded[0] != VERSION) {
-            throw new RuntimeException("Not a valid version");
+            throw new IllegalArgumentException("Not a valid version");
         }
 
         byte[] cypherText = Arrays.copyOfRange(decoded, HEADER_LENGTH, decoded.length);

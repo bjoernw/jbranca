@@ -2,11 +2,14 @@ package org.bjoern.jbranca;
 
 import org.bouncycastle.crypto.engines.ChaChaEngine;
 
-public class XChaCha20Engine extends ChaChaEngine {
+/**
+ * We want to use a 24 byte nonce because that's what the Branca standard calls for.
+ */
+class XChaCha20Engine extends ChaChaEngine {
 
-    public final static int NONCE_SIZE_BYTES = 24;
+    private final static int NONCE_SIZE_BYTES = 24;
 
-    public XChaCha20Engine() {
+    XChaCha20Engine() {
         super(20);
     }
 
